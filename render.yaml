@@ -2,15 +2,16 @@ services:
   - type: web
     name: ngo-platform-api
     env: python
+    pythonVersion: "3.11.9"
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: MONGODB_URL
-        sync: false          # set this manually in Render dashboard
+        sync: false
       - key: DB_NAME
         value: ngo_db
       - key: SECRET_KEY
-        generateValue: true  # Render auto-generates a secure random value
+        generateValue: true
       - key: ALGORITHM
         value: HS256
       - key: ACCESS_TOKEN_EXPIRE_MINUTES
