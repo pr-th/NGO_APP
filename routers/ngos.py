@@ -17,6 +17,8 @@ class NGOUpdate(BaseModel):
 
 class ResourceCreate(BaseModel):
     title: str
+    quantity: float = 0  # amount/count of resource
+    quantity_unit: str = ""  # e.g. "kg", "liters", "boxes", "units"
     description: str = ""
     image_url: str = ""
     category: str = ""
@@ -101,6 +103,8 @@ async def add_resource(body: ResourceCreate, ngo=Depends(require_ngo), db=Depend
         "description": body.description,
         "image_url": body.image_url,
         "category": body.category,
+        "quantity": body.quantity,
+        "quantity_unit": body.quantity_unit,
         "donations": [],
         "partner_organizations": [],
         "created_at": utcnow().isoformat(),
