@@ -8,7 +8,7 @@ settings = get_settings()
 
 if settings.gemini_api_key:
     genai.configure(api_key=settings.gemini_api_key)
-    MODEL = genai.GenerativeModel("gemini-1.5-flash")
+    MODEL = genai.GenerativeModel("gemini-2.0-flash")
 else:
     MODEL = None
 
