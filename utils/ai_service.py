@@ -21,20 +21,23 @@ def _call_groq(prompt: str) -> Any:
     return json.loads(response.choices[0].message.content)
 
 
-async def generate_ai_post(location: str, needs: List[Dict[str, Any]], tone: str, ngo_name: str) -> Dict[str, Any]:
+async def generate_ai_post(location: str, needs: List[Dict[str, Any]], tone: str, ngo_name: str, topic: Optional[str] = None) -> Dict[str, Any]:
     """Generate a social media post using Groq based on area needs."""
     if not CLIENT:
         return {"error": "Groq not configured"}
 
+    topic_line = f"\nFocus specifically on: {topic}" if topic else ""
+
     prompt = f"""
     Write a social media post for NGO "{ngo_name}" about needs in {location}.
+    {topic_line}
 
-    Predicted Needs:
+    Predicted Needs (for context):
     {json.dumps(needs[:2], indent=2)}
 
     Tone: {tone}
 
-    Post should address the top need, call people to action, be {tone} in tone,
+    Post should address the topic or top need, call people to action, be {tone} in tone,
     include 3 hashtags, and be 280-400 characters.
 
     Respond ONLY with a JSON object:

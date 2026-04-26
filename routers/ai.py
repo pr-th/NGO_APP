@@ -68,10 +68,6 @@ async def ai_write_post(
     ngo=Depends(require_ngo),
     db=Depends(get_db),
 ):
-    """
-    Predicts area needs then generates a complete social media post for the NGO.
-    """
-    # Get needs first
     needs_result = await predict_area_needs(body.location, db)
 
     if "error" in needs_result:
@@ -82,17 +78,12 @@ async def ai_write_post(
     if not needs:
         raise HTTPException(400, f"Could not determine needs for {body.location}")
 
-    # Filter by topic if specified
-    if body.topic:
-        needs = [n for n in needs if n.get("category") == body.topic]
-        if not needs:
-            raise HTTPException(400, f"No '{body.topic}' needs predicted for {body.location}")
-
     result = await generate_ai_post(
         location=body.location,
         needs=needs,
         tone=body.tone,
         ngo_name=ngo.get("name", "Our NGO"),
+        topic=body.topic,          # ← pass raw topic directly, no filtering
     )
 
     if "error" in result:
@@ -101,7 +92,6 @@ async def ai_write_post(
     result["location"] = body.location
     result["powered_by"] = "Gemini"
     return result
-
 
 @router.post("/volunteer-recommendations", summary="Recommend volunteers for a problem")
 async def get_volunteer_recommendations(
