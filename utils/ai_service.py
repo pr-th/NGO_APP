@@ -1,28 +1,30 @@
 import json
 from typing import Optional, List, Dict, Any
-import google.generativeai as genai
+from groq import Groq
 from core.config import get_settings
 from utils.helpers import serialize
 
 settings = get_settings()
 
-if settings.gemini_api_key:
-    genai.configure(api_key=settings.gemini_api_key)
-    MODEL = genai.GenerativeModel("gemini-2.0-flash")
-else:
-    MODEL = None
+CLIENT = Groq(api_key=settings.groq_api_key) if getattr(settings, "groq_api_key", None) else None
+MODEL_NAME = "llama-3.3-70b-versatile"
 
 
-def _parse_json(text: str) -> Any:
-    """Strip markdown fences and parse JSON safely."""
-    clean = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-    return json.loads(clean)
+def _call_groq(prompt: str) -> Any:
+    """Call Groq and parse JSON response."""
+    response = CLIENT.chat.completions.create(
+        model=MODEL_NAME,
+        messages=[{"role": "user", "content": prompt}],
+        response_format={"type": "json_object"},
+        temperature=0.7,
+    )
+    return json.loads(response.choices[0].message.content)
 
 
 async def generate_ai_post(location: str, needs: List[Dict[str, Any]], tone: str, ngo_name: str) -> Dict[str, Any]:
-    """Generate a social media post using Gemini based on area needs."""
-    if not MODEL:
-        return {"error": "Gemini not configured"}
+    """Generate a social media post using Groq based on area needs."""
+    if not CLIENT:
+        return {"error": "Groq not configured"}
 
     prompt = f"""
     Write a social media post for NGO "{ngo_name}" about needs in {location}.
@@ -35,30 +37,29 @@ async def generate_ai_post(location: str, needs: List[Dict[str, Any]], tone: str
     Post should address the top need, call people to action, be {tone} in tone,
     include 3 hashtags, and be 280-400 characters.
 
-    RESPOND ONLY IN JSON (no markdown fences):
+    Respond ONLY with a JSON object:
     {{
         "title": "Headline",
         "content": "Post body",
         "hashtags": ["#tag1", "#tag2", "#tag3"],
-        "category": "appeal|announcement",
-        "best_time_to_post": "morning|afternoon|evening"
+        "category": "appeal or announcement",
+        "best_time_to_post": "morning or afternoon or evening"
     }}
     """
 
     try:
-        response = MODEL.generate_content(prompt)
-        return _parse_json(response.text)
+        return _call_groq(prompt)
     except Exception as e:
         return {"error": str(e)}
 
 
 async def predict_area_needs(location: str, db=None) -> Dict[str, Any]:
     """
-    Predict community needs for a given area using Gemini.
+    Predict community needs for a given area using Groq/Llama.
     Optionally enriches with any existing DB problem data.
     """
-    if not MODEL:
-        return {"error": "Gemini not configured"}
+    if not CLIENT:
+        return {"error": "Groq not configured"}
 
     db_context = ""
     if db is not None:
@@ -85,12 +86,12 @@ async def predict_area_needs(location: str, db=None) -> Dict[str, Any]:
 
     Return the top 5 predicted needs ranked by urgency.
 
-    RESPOND ONLY IN JSON (no markdown fences):
+    Respond ONLY with a JSON object:
     {{
         "predicted_needs": [
             {{
-                "category": "health|education|infrastructure|environment|safety|food|employment|sanitation",
-                "urgency": "critical|high|medium",
+                "category": "health or education or infrastructure or environment or safety or food or employment or sanitation",
+                "urgency": "critical or high or medium",
                 "score": 0.95,
                 "reason": "Brief explanation why this is a need in this area"
             }}
@@ -99,12 +100,11 @@ async def predict_area_needs(location: str, db=None) -> Dict[str, Any]:
     """
 
     try:
-        response = MODEL.generate_content(prompt)
-        result = _parse_json(response.text)
+        result = _call_groq(prompt)
         return {
             "location": location,
             "predicted_needs": result.get("predicted_needs", []),
-            "powered_by": "Gemini",
+            "powered_by": "Groq / Llama-3.3-70b",
         }
     except Exception as e:
         return {"error": str(e)}
@@ -112,10 +112,10 @@ async def predict_area_needs(location: str, db=None) -> Dict[str, Any]:
 
 async def recommend_ngo_posts(ngo: Dict[str, Any], db=None, focus_areas: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     """
-    Recommend what posts an NGO should write, using Gemini to assess area needs.
+    Recommend what posts an NGO should write, using Groq to assess area needs.
     """
-    if not MODEL:
-        return [{"error": "Gemini not configured"}]
+    if not CLIENT:
+        return [{"error": "Groq not configured"}]
 
     location = ngo.get("location", "Unknown")
     ngo_name = ngo.get("name", "NGO")
@@ -128,13 +128,13 @@ async def recommend_ngo_posts(ngo: Dict[str, Any], db=None, focus_areas: Optiona
     Recommend 3 social media posts they should publish this week based on
     likely community needs in {location}.
 
-    RESPOND ONLY IN JSON (no markdown fences):
+    Respond ONLY with a JSON object:
     {{
         "recommendations": [
             {{
-                "category": "health|education|infrastructure|environment|safety|food|employment|sanitation",
-                "urgency": "critical|high|medium",
-                "suggested_post_type": "appeal|announcement|update",
+                "category": "health or education or infrastructure or environment or safety or food or employment or sanitation",
+                "urgency": "critical or high or medium",
+                "suggested_post_type": "appeal or announcement or update",
                 "reason": "Why this post matters right now",
                 "suggested_title": "A compelling post headline"
             }}
@@ -143,8 +143,7 @@ async def recommend_ngo_posts(ngo: Dict[str, Any], db=None, focus_areas: Optiona
     """
 
     try:
-        response = MODEL.generate_content(prompt)
-        result = _parse_json(response.text)
+        result = _call_groq(prompt)
         return result.get("recommendations", [])
     except Exception as e:
         return [{"error": str(e)}]
@@ -152,7 +151,7 @@ async def recommend_ngo_posts(ngo: Dict[str, Any], db=None, focus_areas: Optiona
 
 async def recommend_volunteer_assignments(problem_id: str, db) -> List[Dict[str, Any]]:
     """
-    Recommend volunteers for a problem. Uses DB volunteer data + Gemini for ranking.
+    Recommend volunteers for a problem. Uses DB volunteer data + Groq for ranking.
     Falls back to ideal volunteer profiles if no volunteers exist in DB.
     """
     from bson import ObjectId
@@ -169,9 +168,9 @@ async def recommend_volunteer_assignments(problem_id: str, db) -> List[Dict[str,
     if not volunteers:
         volunteers = await db.volunteers.find({}).to_list(length=100)
 
-    # No volunteers in DB — ask Gemini what kind of volunteer would suit this problem
+    # No volunteers in DB — ask Groq what kind of volunteer would suit this problem
     if not volunteers:
-        if not MODEL:
+        if not CLIENT:
             return []
         prompt = f"""
         A community problem needs volunteers:
@@ -182,7 +181,7 @@ async def recommend_volunteer_assignments(problem_id: str, db) -> List[Dict[str,
 
         Describe the ideal volunteer profiles for this problem.
 
-        RESPOND ONLY IN JSON (no markdown fences):
+        Respond ONLY with a JSON object:
         {{
             "ideal_profiles": [
                 {{
@@ -194,14 +193,13 @@ async def recommend_volunteer_assignments(problem_id: str, db) -> List[Dict[str,
         }}
         """
         try:
-            response = MODEL.generate_content(prompt)
-            result = _parse_json(response.text)
+            result = _call_groq(prompt)
             return result.get("ideal_profiles", [])
         except Exception as e:
             return [{"error": str(e)}]
 
-    # We have volunteers — use Gemini to rank them
-    if not MODEL:
+    # We have volunteers — use Groq to rank them
+    if not CLIENT:
         from utils.vertex_ai_models import volunteer_scorer
         ranked = volunteer_scorer.rank_volunteers(volunteers, problem)
         return serialize(ranked[:5])
@@ -231,7 +229,7 @@ async def recommend_volunteer_assignments(problem_id: str, db) -> List[Dict[str,
 
     Return top 5 ranked by suitability.
 
-    RESPOND ONLY IN JSON (no markdown fences):
+    Respond ONLY with a JSON object:
     {{
         "ranked": [
             {{
@@ -245,8 +243,7 @@ async def recommend_volunteer_assignments(problem_id: str, db) -> List[Dict[str,
     """
 
     try:
-        response = MODEL.generate_content(prompt)
-        result = _parse_json(response.text)
+        result = _call_groq(prompt)
         return result.get("ranked", [])
     except Exception as e:
         return [{"error": str(e)}]
@@ -254,11 +251,11 @@ async def recommend_volunteer_assignments(problem_id: str, db) -> List[Dict[str,
 
 async def analyze_ngo_dashboard(ngo: Dict[str, Any], db) -> Dict[str, Any]:
     """
-    Generate an AI-powered dashboard summary for an NGO using Gemini.
-    Uses whatever DB stats are available; Gemini fills in area insights.
+    Generate an AI-powered dashboard summary for an NGO using Groq.
+    Uses whatever DB stats are available; Groq fills in area insights.
     """
-    if not MODEL:
-        return {"error": "Gemini not configured"}
+    if not CLIENT:
+        return {"error": "Groq not configured"}
 
     ngo_id = str(ngo.get("_id", ""))
     location = ngo.get("location", "Unknown")
@@ -277,17 +274,17 @@ async def analyze_ngo_dashboard(ngo: Dict[str, Any], db) -> Dict[str, Any]:
     - Active problems reported: {active_problems}
     - Volunteers: {total_volunteers} total, {busy_volunteers} currently assigned
 
-    Based on the location "{location}", also predict the top 3 community needs
+    Based on the location "{location}", predict the top 3 community needs
     and give a 2-sentence summary of the NGO situation and what to prioritize.
 
-    RESPOND ONLY IN JSON (no markdown fences):
+    Respond ONLY with a JSON object:
     {{
         "summary": "2 sentence overall summary",
         "priority_action": "The single most important thing to do this week",
         "area_predictions": [
             {{
                 "category": "category name",
-                "urgency": "critical|high|medium",
+                "urgency": "critical or high or medium",
                 "reason": "brief reason"
             }}
         ]
@@ -295,8 +292,7 @@ async def analyze_ngo_dashboard(ngo: Dict[str, Any], db) -> Dict[str, Any]:
     """
 
     try:
-        response = MODEL.generate_content(prompt)
-        result = _parse_json(response.text)
+        result = _call_groq(prompt)
     except Exception as e:
         result = {"summary": str(e), "priority_action": "", "area_predictions": []}
 
@@ -311,5 +307,5 @@ async def analyze_ngo_dashboard(ngo: Dict[str, Any], db) -> Dict[str, Any]:
         "area_predictions": predictions,
         "priority_action": result.get("priority_action", ""),
         "summary": result.get("summary", ""),
-        "powered_by": "Gemini",
+        "powered_by": "Groq / Llama-3.3-70b",
     }

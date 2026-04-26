@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gcp_project_id: str = ""  # Google Cloud Project ID
     gcp_location: str = "us-central1"  # Vertex AI location
+    groq_api_key: Optional[str] = None
     class Config:
         env_file = ".env"
 
