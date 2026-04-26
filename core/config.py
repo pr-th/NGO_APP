@@ -8,7 +8,9 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
     refresh_token_expire_days: int = 30
-
+    gemini_api_key: str = ""
+    gcp_project_id: str = ""  # Google Cloud Project ID
+    gcp_location: str = "us-central1"  # Vertex AI location
     class Config:
         env_file = ".env"
 
