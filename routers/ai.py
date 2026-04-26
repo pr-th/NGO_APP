@@ -73,6 +73,10 @@ async def ai_write_post(
     """
     # Get needs first
     needs_result = await predict_area_needs(body.location, db)
+
+    if "error" in needs_result:
+        raise HTTPException(500, needs_result["error"])
+
     needs = needs_result.get("predicted_needs", [])
 
     if not needs:
