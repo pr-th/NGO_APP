@@ -1,9 +1,8 @@
-# ═══════════════════════════════════════════════════════════════════
-# ALREADY EXISTS - TOP OF FILE
-# ═══════════════════════════════════════════════════════════════════
-from fastapi import APIRouter, HTTPException, Depends, Query
+import json
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional, List
+
 from core.database import get_db
 from core.security import require_ngo, get_current_user
 from utils.ai_service import (
@@ -11,16 +10,15 @@ from utils.ai_service import (
     recommend_ngo_posts,
     recommend_volunteer_assignments,
     analyze_ngo_dashboard,
+    generate_ai_post,
 )
 from utils.helpers import serialize
 
-# ✅ ADD THIS IMPORT:
-from utils.vertex_ai_models import area_needs_predictor
+router = APIRouter(prefix="/ai", tags=["AI"])
 
 
-# ═══════════════════════════════════════════════════════════════════
-# ALREADY EXISTS - SCHEMAS SECTION
-# ═══════════════════════════════════════════════════════════════════
+# ── Schemas ──────────────────────────────────────────────────────────────────
+
 class AreaNeedsRequest(BaseModel):
     location: str
     days_back: int = 30
@@ -31,123 +29,116 @@ class VolunteerRecommendationRequest(BaseModel):
 class PostRecommendationRequest(BaseModel):
     focus_areas: Optional[List[str]] = None
 
-# ✅ ADD THESE NEW SCHEMAS:
 class PostWriteRequest(BaseModel):
     location: str
     topic: Optional[str] = None
-    tone: str = "inspirational"  # "urgent", "informative", "inspirational"
+    tone: str = "inspirational"  # "urgent" | "informative" | "inspirational"
 
 
-# ═══════════════════════════════════════════════════════════════════
-# ALREADY EXISTS - ROUTES SECTION
-# ═══════════════════════════════════════════════════════════════════
-@router.post("/area-needs", summary="...")
+# ── Routes ───────────────────────────────────────────────────────────────────
+
+@router.post("/area-needs", summary="Predict community needs for an area")
 async def get_area_needs(body: AreaNeedsRequest, db=Depends(get_db)):
-    ...
+    """
+    Uses Gemini to predict the top community needs for a given location.
+    Enriches with any existing DB problem data if available.
+    """
+    result = await predict_area_needs(body.location, db)
+    if "error" in result:
+        raise HTTPException(500, result["error"])
+    return result
 
-@router.post("/ngo-post-recommendations", summary="...")
-async def get_post_recommendations(body: PostRecommendationRequest, ngo=Depends(require_ngo), db=Depends(get_db)):
-    ...
 
-# ✅ ADD THESE 2 NEW ROUTES (at the end of the file, before last closing):
+@router.post("/ngo-post-recommendations", summary="Recommend posts for an NGO to publish")
+async def get_post_recommendations(
+    body: PostRecommendationRequest,
+    ngo=Depends(require_ngo),
+    db=Depends(get_db),
+):
+    """
+    Recommends 3 posts the NGO should publish this week based on area needs.
+    """
+    recommendations = await recommend_ngo_posts(ngo, db, body.focus_areas)
+    return {"recommendations": recommendations}
 
-@router.post("/write-post", summary="AI writes a post based on area needs")
+
+@router.post("/write-post", summary="AI writes a ready-to-publish post for the NGO")
 async def ai_write_post(
     body: PostWriteRequest,
     ngo=Depends(require_ngo),
     db=Depends(get_db),
 ):
     """
-    AI analyzes area needs and writes a complete post for NGO to publish.
+    Predicts area needs then generates a complete social media post for the NGO.
     """
-    if not MODEL:
-        raise HTTPException(500, "AI not configured")
-    
-    # Get area problems
-    area_problems = await db.problems.find(
-        {"location": {"$regex": body.location, "$options": "i"}}
-    ).sort("created_at", -1).limit(50).to_list(length=50)
-    
-    ml_predictions = area_needs_predictor.predict_next_needs(area_problems)
-    
-    if not ml_predictions:
-        raise HTTPException(400, f"No data for {body.location}")
-    
+    # Get needs first
+    needs_result = await predict_area_needs(body.location, db)
+    needs = needs_result.get("predicted_needs", [])
+
+    if not needs:
+        raise HTTPException(400, f"Could not determine needs for {body.location}")
+
+    # Filter by topic if specified
     if body.topic:
-        ml_predictions = [p for p in ml_predictions if p["category"] == body.topic]
-        if not ml_predictions:
-            raise HTTPException(400, f"No {body.topic} needs predicted")
-    
-    prompt = f"""
-    Write an engaging social media post for an NGO about community needs.
-    
-    Location: {body.location}
-    Predicted Needs: {json.dumps(ml_predictions[:2], indent=2)}
-    Tone: {body.tone}
-    NGO: {ngo.get('name', 'Our NGO')}
-    
-    Create a post that addresses the needs, calls to action, and is {body.tone} in tone.
-    Include 3 hashtags.
-    
-    RESPOND ONLY IN THIS JSON FORMAT:
-    {{
-        "title": "Post headline (max 10 words)",
-        "content": "Post body (2-3 sentences)",
-        "tags": ["tag1", "tag2", "tag3"],
-        "category": "appeal|announcement|update",
-        "why_this_post": "Why this matters now"
-    }}
+        needs = [n for n in needs if n.get("category") == body.topic]
+        if not needs:
+            raise HTTPException(400, f"No '{body.topic}' needs predicted for {body.location}")
+
+    result = await generate_ai_post(
+        location=body.location,
+        needs=needs,
+        tone=body.tone,
+        ngo_name=ngo.get("name", "Our NGO"),
+    )
+
+    if "error" in result:
+        raise HTTPException(500, result["error"])
+
+    result["location"] = body.location
+    result["powered_by"] = "Gemini"
+    return result
+
+
+@router.post("/volunteer-recommendations", summary="Recommend volunteers for a problem")
+async def get_volunteer_recommendations(
+    body: VolunteerRecommendationRequest,
+    ngo=Depends(require_ngo),
+    db=Depends(get_db),
+):
     """
-    
-    try:
-        response = MODEL.generate_content(prompt)
-        result = json.loads(response.text)
-        result["location"] = body.location
-        result["powered_by"] = "Vertex AI ML + Gemini"
-        return result
-    except Exception as e:
-        raise HTTPException(500, f"AI generation failed: {str(e)}")
+    Ranks available volunteers for a given problem using Gemini.
+    Returns ideal profiles if no volunteers are registered yet.
+    """
+    result = await recommend_volunteer_assignments(body.problem_id, db)
+    return {"recommendations": result}
 
 
-@router.get("/area-alert/{location}", summary="Get predicted needs for area (NGOs stay informed)")
+@router.get("/dashboard", summary="AI-powered NGO dashboard summary")
+async def get_ngo_dashboard(ngo=Depends(require_ngo), db=Depends(get_db)):
+    """
+    Returns AI-generated insights: area predictions, volunteer stats, priority action.
+    """
+    result = await analyze_ngo_dashboard(ngo, db)
+    if "error" in result:
+        raise HTTPException(500, result["error"])
+    return result
+
+
+@router.get("/area-alert/{location}", summary="Public: predicted needs for any area")
 async def get_area_alert(location: str, db=Depends(get_db)):
     """
-    Returns predicted needs for an area so NGOs know what to address.
-    Public endpoint - anyone can check area needs.
+    Public endpoint — anyone can check predicted community needs for an area.
     """
-    problems = await db.problems.find(
-        {"location": {"$regex": location, "$options": "i"}}
-    ).sort("created_at", -1).limit(50).to_list(length=50)
-    
-    if not problems:
-        return {
-            "location": location,
-            "predicted_needs": [],
-            "message": "No problems reported yet in this area"
-        }
-    
-    predictions = area_needs_predictor.predict_next_needs(problems)
-    
-    # Optional: Use Gemini to write summary
-    summary = ""
-    if MODEL and predictions:
-        prompt = f"""
-        Write a brief 1-2 sentence summary of community needs for {location}.
-        Format: Just text, no JSON.
-        
-        Needs: {json.dumps(predictions[:3], indent=2)}
-        """
-        try:
-            response = MODEL.generate_content(prompt)
-            summary = response.text
-        except:
-            summary = f"Top priority: {predictions[0]['category']}"
-    
+    result = await predict_area_needs(location, db)
+    if "error" in result:
+        raise HTTPException(500, result["error"])
+
+    needs = result.get("predicted_needs", [])
     return {
         "location": location,
-        "predicted_needs": predictions,
-        "summary": summary,
-        "recommend_action": f"NGOs should focus on {predictions[0]['category']} if available" if predictions else "No data yet",
-        "problems_analyzed": len(problems),
-        "powered_by": "Vertex AI ML"
+        "predicted_needs": needs,
+        "recommend_action": (
+            f"NGOs should focus on {needs[0]['category']}" if needs else "No data yet"
+        ),
+        "powered_by": "Gemini",
     }
