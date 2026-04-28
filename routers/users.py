@@ -20,7 +20,6 @@ class PasswordChange(BaseModel):
 
 class ReactionBody(BaseModel):
     target_id: str          # problem or post ID
-    target_type: str        # "problem" | "post"
     action: str             # "like" | "dislike" | "remove"
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -68,21 +67,20 @@ async def react(body: ReactionBody, current=Depends(get_current_user), db=Depend
     uid = current["_id"]
 
     # Determine which collection the target lives in
-    target_col = db.problems if body.target_type == "problem" else db.posts
-    target = await target_col.find_one({"_id": body.target_id})
+    target = await db.problems.find_one({"_id": body.target_id})
     if not target:
-        raise HTTPException(404, f"{body.target_type} not found")
+        raise HTTPException(404, "Problem not found")
 
     tid = body.target_id
     if body.action == "like":
         await col.update_one({"_id": uid}, {"$addToSet": {"liked": tid}, "$pull": {"disliked": tid}})
-        await target_col.update_one({"_id": tid}, {"$addToSet": {"likes": uid}, "$pull": {"dislikes": uid}})
+        await db.problems.update_one({"_id": tid}, {"$addToSet": {"likes": uid}, "$pull": {"dislikes": uid}})
     elif body.action == "dislike":
         await col.update_one({"_id": uid}, {"$addToSet": {"disliked": tid}, "$pull": {"liked": tid}})
-        await target_col.update_one({"_id": tid}, {"$addToSet": {"dislikes": uid}, "$pull": {"likes": uid}})
+        await db.problems.update_one({"_id": tid}, {"$addToSet": {"dislikes": uid}, "$pull": {"likes": uid}})
     elif body.action == "remove":
         await col.update_one({"_id": uid}, {"$pull": {"liked": tid, "disliked": tid}})
-        await target_col.update_one({"_id": tid}, {"$pull": {"likes": uid, "dislikes": uid}})
+        await db.problems.update_one({"_id": tid}, {"$pull": {"likes": uid, "dislikes": uid}})
     else:
         raise HTTPException(400, "action must be like | dislike | remove")
 

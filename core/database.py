@@ -33,9 +33,6 @@ async def create_indexes():
     # NGOs
     await db.ngos.create_index("pan_number", unique=True)
     await db.ngos.create_index("darpan_id", unique=True)
-    # Problems
-    await db.problems.create_index([("category", 1), ("importance", 1)])
-    await db.problems.create_index([("created_at", -1)])
     # Posts
     await db.posts.create_index([("created_at", -1)])
     await db.posts.create_index([("category", 1)])
