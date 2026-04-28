@@ -27,7 +27,8 @@ async def create_indexes():
     await db.users.create_index("email", unique=True)
     await db.users.create_index("aadhaar_id", unique=True)
     # Volunteers
-    await db.volunteers.create_index("user_id", unique=True)
+    await db.volunteers.create_index("email", unique=True)
+    await db.volunteers.create_index("aadhaar_id", unique=True)
     await db.volunteers.create_index([("skills", 1)])
     # NGOs
     await db.ngos.create_index("pan_number", unique=True)

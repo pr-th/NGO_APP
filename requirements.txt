@@ -13,6 +13,7 @@ httpx==0.27.0
 google-generativeai==0.8.3
 google-cloud-aiplatform==1.60.0
 google-cloud-bigquery==3.27.0
+google-cloud-storage
 scikit-learn==1.5.1
 numpy==1.26.4
 pandas==2.2.2

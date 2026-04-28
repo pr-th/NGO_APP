@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gcp_project_id: str = ""  # Google Cloud Project ID
     gcp_location: str = "us-central1"  # Vertex AI location
+    gcs_bucket_name: str = ""  # Google Cloud Storage bucket for uploads
+    gcs_public_uploads: bool = True  # if true, return public https URL
+    gcs_signed_url_expire_minutes: int = 60  # used when gcs_public_uploads=false
     class Config:
         env_file = ".env"
 

@@ -1,10 +1,11 @@
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, File, Form, UploadFile
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timezone
 from core.database import get_db
 from core.security import get_current_user, require_ngo
 from utils.helpers import new_id, utcnow, serialize
+from utils.gcs_storage import upload_image_and_get_url
 
 router = APIRouter(prefix="/posts", tags=["Posts"])
 
@@ -54,6 +55,47 @@ async def create_post(body: PostCreate, current=Depends(get_current_user), db=De
         "posted_by": current["_id"],
         "poster_role": current["role"],
         "likes": [],       # user IDs who upvoted
+        "dislikes": [],
+        "upvote_count": 0,
+        "created_at": utcnow(),
+        "updated_at": utcnow(),
+    }
+    await db.posts.insert_one(doc)
+    return serialize(doc)
+
+
+@router.post("/with-image", summary="Create a post with an uploaded image file")
+async def create_post_with_image(
+    title: str = Form(...),
+    content: str = Form(...),
+    category: str = Form("general"),
+    tags: Optional[str] = Form(None, description="Comma-separated tags"),
+    image: Optional[UploadFile] = File(None),
+    current=Depends(get_current_user),
+    db=Depends(get_db),
+):
+    if not await can_post(current, db):
+        raise HTTPException(403, "Only NGOs or selected volunteers can post")
+
+    image_url: Optional[str] = None
+    if image is not None:
+        image_url = await upload_image_and_get_url(image, owner_id=current["_id"])
+
+    tag_list: List[str] = []
+    if tags:
+        tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+
+    pid = new_id()
+    doc = {
+        "_id": pid,
+        "title": title,
+        "content": content,
+        "category": category,
+        "image_url": image_url,
+        "tags": tag_list,
+        "posted_by": current["_id"],
+        "poster_role": current["role"],
+        "likes": [],
         "dislikes": [],
         "upvote_count": 0,
         "created_at": utcnow(),
